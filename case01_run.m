@@ -19,12 +19,13 @@ disp('TS-EMO 최적화를 시작합니다...');
 % (1) 목적 함수 연결 (가상 반응기)
 obj_fun = @(x) virtual_reactor(x, Mdl_STY, Mdl_Efactor);
 
-% (2) 초기 20개 데이터 추출 (TS-EMO 알고리즘의 초기 학습용)
-%X_init = X_train(1:20, :);
-%Y_init = [Y_STY_log(1:20), Y_Efactor_log(1:20)];
+% (2) 초기 n개 데이터 추출 (TS-EMO 알고리즘의 초기 학습용)
+n = 20;     %------변수수정
+%X_init = X_train(1:n, :);
+%Y_init = [Y_STY_log(1:n), Y_Efactor_log(1:n)];
 
 % 변경: 전체 데이터 중 랜덤하게 20개 추출 (일반화 성능 테스트)
-rand_idx = randperm(size(X_train, 1), 20); 
+rand_idx = randperm(size(X_train, 1), n); 
 X_init = X_train(rand_idx, :);
 Y_init = [Y_STY_log(rand_idx), Y_Efactor_log(rand_idx)];
 
@@ -33,7 +34,7 @@ lower_bounds = [0.5, 1.0, 0.1, 60];
 upper_bounds = [2.0, 5.0, 0.5, 140];
 
 % (4) TSEMO_V4.m 에러 방지를 위한 필수 Opt(옵션) 세팅
-Opt.maxeval = 48;                 % 추가로 탐색할 실험 횟수 (예: 30번 더 찔러봄)
+Opt.maxeval = 48;                 % 추가로 탐색할 실험 횟수 (예: 30번 더 찔러봄) ---------변수수정
 Opt.NoOfBachSequential = 1;       % 한 번에 제안할 실험 개수
 Opt.pop = 100;                    % 내부 유전 알고리즘(NSGA-II) 인구 수
 Opt.Generation = 100;             % 내부 유전 알고리즘 세대 수
@@ -63,14 +64,14 @@ actual_Efactor_pareto = exp(Ypareto(:, 2));
 figure('Color', 'w'); hold on;
 
 % 1. 초기 20개 점 (LHC) - 검은색 네모 
-scatter(actual_STY_all(1:20), actual_Efactor_all(1:20), 40, ...
+scatter(actual_STY_all(1:n), actual_Efactor_all(1:n), 40, ...
         's', 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'k', 'DisplayName', 'LHC');
 
 % 2. TS-EMO가 추가로 찾은 점들 - 주황색 X 
-scatter(actual_STY_all(21:end), actual_Efactor_all(21:end), 60, ...
+scatter(actual_STY_all(n+1:end), actual_Efactor_all(n+1:end), 60, ...
         'x', 'LineWidth', 1.5, 'MarkerEdgeColor', [1 0.5 0], 'DisplayName', 'TS-EMO');
 
-% 3. 파레토 전선 (Pareto Front) - 빨간색 실선 [cite: 173]
+ % 3. 파레토 전선 (Pareto Front) - 빨간색 실선 [cite: 173]
 % 선을 매끄럽게 잇기 위해 STY 기준으로 정렬
 [sorted_STY, sortIdx] = sort(actual_STY_pareto);
 sorted_Efactor = actual_Efactor_pareto(sortIdx);

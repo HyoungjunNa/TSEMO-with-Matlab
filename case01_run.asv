@@ -1,0 +1,104 @@
+addpath(genpath(pwd));
+%% 1. 가상 반응기 모델 학습 (Ground Truth 세팅)
+disp('가상 반응기 데이터를 불러오고 학습을 시작합니다...');
+
+% 데이터 불러오기 (컬럼 순서가 tres, morpholine_eq, conc, temp, E_factor, STY 라고 가정)
+data = readtable('table_s3.csv');
+X_train = data{:, 1:4}; 
+Y_STY_log = -log(data{:, 6});      % STY 극대화 -> 음수 로그
+Y_Efactor_log = log(data{:, 5});   % E-factor 극소화 -> 그냥 로그
+
+% 랜덤 포레스트(앙상블)로 모델 학습
+Mdl_STY = fitrensemble(X_train, Y_STY_log, 'Method', 'Bag');
+Mdl_Efactor = fitrensemble(X_train, Y_Efactor_log, 'Method', 'Bag');
+disp('가상 반응기 학습 완료!');
+
+%% 2. TS-EMO 알고리즘 세팅 및 연동
+disp('TS-EMO 최적화를 시작합니다...');
+
+% (1) 목적 함수 연결 (가상 반응기)
+obj_fun = @(x) virtual_reactor(x, Mdl_STY, Mdl_Efactor);
+
+% (2) 초기 n개 데이터 추출 (TS-EMO 알고리즘의 초기 학습용)
+n = 20;
+%X_init = X_train(1:n, :);
+%Y_init = [Y_STY_log(1:n), Y_Efactor_log(1:n)];
+
+% 변경: 전체 데이터 중 랜덤하게 20개 추출 (일반화 성능 테스트)
+rand_idx = randperm(size(X_train, 1), n); 
+X_init = X_train(rand_idx, :);
+Y_init = [Y_STY_log(rand_idx), Y_Efactor_log(rand_idx)];
+
+% (3) 변수 탐색 범위 설정 [tres, morpholine_eq, conc, temp]
+lower_bounds = [0.5, 1.0, 0.1, 60];
+upper_bounds = [2.0, 5.0, 0.5, 140];
+
+% (4) TSEMO_V4.m 에러 방지를 위한 필수 Opt(옵션) 세팅
+Opt.maxeval = 48;                 % 추가로 탐색할 실험 횟수 (예: 30번 더 찔러봄)
+Opt.NoOfBachSequential = 1;       % 한 번에 제안할 실험 개수
+Opt.pop = 100;                    % 내부 유전 알고리즘(NSGA-II) 인구 수
+Opt.Generation = 100;             % 내부 유전 알고리즘 세대 수
+
+% GP(가우시안 프로세스) 세부 옵션 설정 (목적 함수가 2개이므로 i=1:2)
+for i = 1:2
+    Opt.GP(i).matern = 5;         % Matern 5/2 커널 사용 (논문 디폴트)
+    Opt.GP(i).fun_eval = 100;     % 하이퍼파라미터 최적화 평가 횟수
+    Opt.GP(i).nSpectralpoints = 4000; % 스펙트럴 샘플링 포인트 수
+end
+
+% (5) TSEMO_V4 본격 실행! (수정할 필요 없이 그대로 호출)
+[Xpareto, Ypareto, X_final, Y_final] = TSEMO_V4(obj_fun, X_init, Y_init, lower_bounds, upper_bounds, Opt);
+
+disp('최적화 시뮬레이션 종료!');
+%% 3. 논문 스타일 시각화 (Figure 2 재현)
+disp('논문 스타일로 그래프를 생성합니다...');
+
+% 데이터 역변환 (로그 스케일 -> 실제 수치)
+% Y의 1열은 -ln(STY), 2열은 ln(E-factor)이므로 exp를 사용해 복원
+actual_STY_all = exp(-Y_final(:, 1));      
+actual_Efactor_all = exp(Y_final(:, 2));   
+
+actual_STY_pareto = exp(-Ypareto(:, 1));
+actual_Efactor_pareto = exp(Ypareto(:, 2));
+
+figure('Color', 'w'); hold on;
+
+% 1. 초기 20개 점 (LHC) - 검은색 네모 
+scatter(actual_STY_all(1:n), actual_Efactor_all(1:n), 40, ...
+        's', 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'k', 'DisplayName', 'LHC');
+
+% 2. TS-EMO가 추가로 찾은 점들 - 주황색 X 
+scatter(actual_STY_all(n+Opt.maxeval:end), actual_Efactor_all(n+Opt.maxeval:end), 60, ...
+        'x', 'LineWidth', 1.5, 'MarkerEdgeColor', [1 0.5 0], 'DisplayName', 'TS-EMO');
+
+disp('TS-EMO 최적화를 시작합니다...');
+% 3. 파레토 전선 (Pareto Front) - 빨간색 실선 [cite: 173]
+% 선을 매끄럽게 잇기 위해 STY 기준으로 정렬
+[sorted_STY, sortIdx] = sort(actual_STY_pareto);
+sorted_Efactor = actual_Efactor_pareto(sortIdx);
+plot(sorted_STY, sorted_Efactor, 'r-', 'LineWidth', 2, 'DisplayName', 'Pareto Front');
+
+% 그래프 디테일 설정 (논문 기준) [cite: 173]
+xlabel('STY / kg m^{-3} h^{-1}', 'FontSize', 12);
+ylabel('E-factor', 'FontSize', 12);
+title('Case Study One: S_NAr Reaction', 'FontSize', 14);
+legend('Location', 'northeast');
+grid on;
+box on;
+
+% 축 범위 조정 (필요시 논문과 동일하게 설정)
+xlim([0 15000]);
+ylim([0 2.5]);
+
+hold off;
+
+function Y = virtual_reactor(X, Mdl_STY, Mdl_Efactor)
+    % X는 TS-EMO가 제안하는 새로운 [1 x 4] 실험 조건 벡터
+    
+    % 가상 반응기 모델을 통해 결과 예측
+    y1 = predict(Mdl_STY, X);
+    y2 = predict(Mdl_Efactor, X);
+    
+    % TS-EMO가 읽을 수 있도록 배열로 반환
+    Y = [y1, y2];
+end

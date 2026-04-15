@@ -1,0 +1,116 @@
+addpath(genpath(pwd));
+
+%% 1. 데이터 로드 및 기준 설정
+disp('데이터 로드 및 기준 하이퍼볼륨(HV) 계산 중...');
+data = readtable('table_s3.csv');
+X_all = data{:, 1:4}; 
+Y_all = [-log(data{:, 6}), log(data{:, 5})]; 
+
+% HV 계산을 위한 Shift 처리
+offset = abs(min(Y_all)) + 1;
+Y_all_pos = Y_all + offset;
+ref_point_pos = max(Y_all_pos) * 1.1; 
+
+% [기준 1] Table S3 (68개 데이터) 기준 HV
+front_s3 = paretofront(Y_all_pos);
+base_hv_s3 = hypervolume_author(Y_all_pos(front_s3, :), ref_point_pos, 5000);
+
+% 가상 반응기 학습 (Ground Truth)
+Mdl_STY_GT = fitrensemble(X_all, Y_all(:,1), 'Method', 'Bag');
+Mdl_EF_GT = fitrensemble(X_all, Y_all(:,2), 'Method', 'Bag');
+
+% RMSE용 고정 테스트셋 (20%)
+cv = cvpartition(size(X_all,1), 'HoldOut', 0.2);
+X_test = X_all(test(cv), :); 
+Y_test = Y_all(test(cv), :);
+
+%% 2. 실험 실행 설정(변수수정)
+n_list = [24]; % 비교할 횟수 배열
+n_init = 20;
+
+% 결과 저장용
+res_rmse = zeros(length(n_list), 1);
+res_hv = zeros(length(n_list), 1);
+res_Yfinal = cell(length(n_list), 1);
+res_Ypareto = cell(length(n_list), 1);
+
+%% 3. 루프 실행
+for i = 1:length(n_list)
+    total_N = n_list(i);
+    fprintf('\n>>> 최적화 진행 중: N = %d\n', total_N);
+    
+    % 초기 데이터 랜덤 추출
+    idx = randperm(size(X_all, 1), n_init);
+    X_init = X_all(idx, :); Y_init = Y_all(idx, :);
+    
+    % TS-EMO 실행
+    obj_fun = @(x) [predict(Mdl_STY_GT, x), predict(Mdl_EF_GT, x)];
+    Opt.maxeval = total_N - n_init;
+    Opt.NoOfBachSequential = 1; Opt.pop = 100; Opt.Generation = 100;
+    for k = 1:2
+        Opt.GP(k).matern = 5; Opt.GP(k).fun_eval = 100; Opt.GP(k).nSpectralpoints = 4000;
+    end
+    [Xp, Yp, Xf, Yf] = TSEMO_V4(obj_fun, X_init, Y_init, lb, ub, Opt);
+    
+    
+    % RMSE 계산
+    % 1. 현재 TS-EMO가 찾은 '입력 조건(Xf)'과 '결과(Yf)'로 모델 학습
+    Mdl_S_now = fitrensemble(Xf, Yf(:,1), 'Method', 'Bag');
+    Mdl_E_now = fitrensemble(Xf, Yf(:,2), 'Method', 'Bag');
+    
+    % 2. 테스트셋에 대한 예측 수행
+    pred_S = predict(Mdl_S_now, X_test);
+    pred_E = predict(Mdl_E_now, X_test);
+    
+    % 3. 각 목적함수별 RMSE를 따로 확인해보면 어디서 오차가 큰지 알 수 있습니다.
+    rmse_S = sqrt(mean((Y_test(:,1) - pred_S).^2));
+    rmse_E = sqrt(mean((Y_test(:,2) - pred_E).^2));
+    fprintf('res_rmse(i) %d',);
+    fprintf(res_rmse(i));
+
+    % 4. 통합 RMSE 저장 (현재 방식)
+    res_rmse(i) = sqrt(mean(([Y_test(:,1); Y_test(:,2)] - [pred_S; pred_E]).^2));
+
+    % 현재 HV 계산
+    res_hv(i) = hypervolume_author(Yp + offset, ref_point_pos, 5000);
+    
+    % 그래프 생성
+    actual_STY_all = exp(-Yf(:, 1)); actual_Efactor_all = exp(Yf(:, 2));
+    actual_STY_p = exp(-Yp(:, 1)); actual_Efactor_p = exp(Yp(:, 2));
+    figure('Color', 'w', 'Name', sprintf('N=%d', total_N)); hold on;
+    scatter(actual_STY_all(1:n_init), actual_Efactor_all(1:n_init), 40, 's', 'k', 'MarkerFaceColor', 'k', 'DisplayName', 'LHC');
+    scatter(actual_STY_all(n_init+1:end), actual_Efactor_all(n_init+1:end), 60, 'x', 'DisplayName', 'TS-EMO');
+    [s_sty, s_idx] = sort(actual_STY_p); plot(s_sty, actual_Efactor_p(s_idx), 'r-', 'LineWidth', 2, 'DisplayName', 'Pareto Front');
+    xlabel('STY'); ylabel('E-factor'); title(['N = ', num2str(total_N)]); legend; grid on;
+end
+
+%% 4. 2가지 유사도 지표 출력
+% [기준 2] 배열 중 가장 큰 횟수의 HV를 기준으로 설정
+base_hv_max = res_hv(end); 
+
+fprintf('\n====================================================================================\n');
+fprintf(' 실험 횟수(N) |  평균 RMSE  |   평균 HV   | HV 유사도(S3기준) | HV 유사도(Max기준) \n');
+fprintf('------------------------------------------------------------------------------------\n');
+for i = 1:length(n_list)
+    sim_s3 = (res_hv(i) / base_hv_s3) * 100;
+    sim_max = (res_hv(i) / base_hv_max) * 100;
+    % RMSE는 예시 지표값으로 대체(실행 시 계산됨)
+    fprintf('    %3d회     |   %.4f    |   %.4f    |      %6.1f%%      |      %6.1f%%      \n', ...
+            n_list(i), res_rmse(i), res_hv(i), sim_s3, sim_max);
+end
+fprintf('====================================================================================\n');
+
+function v = hypervolume_author(P, r, N)
+    P = P * diag(1./r); [n, d] = size(P); C = rand(N, d);
+    fDominated = false(N, 1); lB = min(P);
+    fcheck = all(bsxfun(@gt, C, lB), 2);
+    for k = 1:n
+        if any(fcheck)
+            f = all(bsxfun(@gt, C(fcheck,:), P(k,:)), 2);
+            fDominated(fcheck) = fDominated(fcheck) | f;
+        end
+    end
+    v = sum(fDominated) / N;
+end
+    
+ 
