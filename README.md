@@ -13,7 +13,6 @@
 아래 이미지는 논문의 결과와 본 프로젝트에서 재현한 시뮬레이션 결과를 비교한 것입니다.
 
 ![Reproduction Results Comparison](https://github.com/HyoungjunNa/TSEMO-with-Matlab/blob/main/%EC%8A%A4%ED%81%AC%EB%A6%B0%EC%83%B7%202026-04-15%20143247.png)
-*(위 링크를 본인의 GITHUB에 올린 이미지 주소로 교체하세요)*
 
 ### 1. 논문 Figure vs 동일 샘플 재현 (재현성 확인)
 * 논문과 동일한 초기 20개 샘플(LHC)을 입력하여 시스템 아키텍처의 정확성을 확보하였습니다.
