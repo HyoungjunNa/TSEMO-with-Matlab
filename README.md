@@ -22,13 +22,17 @@
 * 무작위 초기 샘플(Random LHS)을 투입하는 **Generalization Test**를 수행하였습니다.
 * 초기 데이터의 편향성과 관계없이 TS-EMO 알고리즘이 스스로 최적의 화학 지형을 찾아내어 안정적인 파레토 해를 도출함을 입증하였습니다.
 
-## 📂 저장소 구조
-- `/src`: `TSEMO_V4.m` (메인 엔진), `obj_fun.m` (RF 연동 인터페이스)
-- `/models`: 학습된 Random Forest 모델 파일 (.mat)
-- `/data`: 사례 1, 2 분석용 데이터셋
+## 📂 저장소/파일 구조설명
+- `TSEMO_V4.m` (메인 엔진)
+- `/Direct`,`/Mex_files`,`NGPM_v1.4` (알고리즘)
+- `case01_run.m`, `case02_run.m` (실행 + RandomForest 로직 )
+- `table_s3.csv`, `Table_s5.csv`: 논문 supplementary 내 실험 데이터
 
-## 💡 결론 및 인사이트
-이 프로젝트를 통해 **Random Forest 기반 대리 모델**이 실제 화학 반응의 복잡한 비선형 관계를 훌륭히 모사할 수 있음을 확인했습니다. 이러한 **Digital Twin 기반 최적화**는 실제 공정 투입 전 시행착오 비용을 70% 이상 절감할 수 있는 강력한 도구입니다.
+## 실행방법
+- `case01_run.m, case02_run.m` : Matlab에서 실행
+
+## 💡 결론
+이 프로젝트를 통해 **Random Forest 기반 대리 모델**이 실제 화학 반응의 복잡한 비선형 관계를 훌륭히 모사할 수 있음을 확인했습니다. 
 
 ---
 **Reference:** *Bradford et al., Machine learning meets continuous flow chemistry: Automated optimization towards the Pareto front of multiple objectives, ACS Cent. Sci. 2018*
